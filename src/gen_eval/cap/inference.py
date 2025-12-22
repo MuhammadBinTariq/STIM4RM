@@ -41,7 +41,8 @@ def generate_one(d: Dict, examples: List[Dict], tokenizer, model, max_new_tokens
     prompt = tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer.encode(prompt, add_special_tokens=False, return_tensors="pt")
     input_ids = inputs.to(model.device)
-    response = model.generate(input_ids=input_ids, max_new_tokens=max_new_tokens, do_sample=False)
+    # do_sample is set to False for greedy decoding (deterministic)
+    response = model.generate(input_ids=input_ids, max_new_tokens=max_new_tokens, do_sample=True)
     model_output = tokenizer.batch_decode(response, skip_special_tokens=True)[0].split("<|assistant|>\n")[-1]
     return prompt, model_output
 
@@ -58,6 +59,7 @@ def run(model_name, f_path, example_path, output_path, max_new_tokens, batch_siz
     model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
     with open(f_path) as f:
         all_d = json.load(f)
+    all_d = all_d[:10]  # Get only first 10 examples for testing
     with open(example_path) as f:
         examples = json.load(f)
     result_ls = []

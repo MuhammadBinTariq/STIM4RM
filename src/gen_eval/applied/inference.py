@@ -28,7 +28,8 @@ def generate_one(prompt, tokenizer, model, max_new_tokens):
     Generate the model's output for one example
     """
     inputs = tokenizer.encode(prompt, add_special_tokens=False, return_tensors="pt")
-    response = model.generate(input_ids=inputs.to(model.device), max_new_tokens=max_new_tokens, do_sample=False)
+    # do_sample is set to False for greedy decoding (deterministic)
+    response = model.generate(input_ids=inputs.to(model.device), max_new_tokens=max_new_tokens, do_sample=True)
     model_output = tokenizer.batch_decode(response, skip_special_tokens=True)[0].split("<|assistant|>\n")[-1]
     model_output = cut_at_stop_sequence(model_output, stop_sequences=["Question:", "</s>", "<|im_end|>", "\n\n"])
 
@@ -58,6 +59,7 @@ def run(data_path, model_name, output_path, perturbation_type, batch_size, max_n
     # Load the data
     with open(data_path) as f:
         all_d = json.load(f)
+    all_d = all_d[:10]  # Process only first 10 examples
     # Load the model
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
