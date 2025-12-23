@@ -8,7 +8,7 @@ MODEL_NAME="olmo_7b_instruct"          # starting SFT/policy
 OUT_ROOT="../outputs"
 CKPT_ROOT="../checkpoints"            # where GRPO checkpoints go
 
-NUM_ITERS=15                           # online GRPO iters per task
+NUM_ITERS=5                           # online GRPO iters per task
 NUM_ROLLOUTS=4                        # must match merge pattern in your STIM script
 BATCH_SIZE=2
 
@@ -26,7 +26,7 @@ echo "Starting Multi-Task STIM + GRPO (online) pipeline..."
 TASKS=(
     "applied:original:../data/applied/original.json:../data/applied/examples.txt"
     "formula:original:../data/formula/original.json:../data/formula/examples_cot.txt"
-    "cap:original:../data/cap/original.json:../data/cap/examples.txt"
+    # "cap:original:../data/cap/original.json:../data/cap/examples.txt"
 )
 
 mkdir -p "${OUT_ROOT}" "${CKPT_ROOT}"

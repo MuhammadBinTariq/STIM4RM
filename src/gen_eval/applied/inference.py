@@ -59,7 +59,7 @@ def run(data_path, model_name, output_path, perturbation_type, batch_size, max_n
     # Load the data
     with open(data_path) as f:
         all_d = json.load(f)
-    all_d = all_d[:10]  # Process only first 10 examples
+    all_d = all_d[:7]  # Process only first 10 examples
     # Load the model
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
