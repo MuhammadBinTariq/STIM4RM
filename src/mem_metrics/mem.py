@@ -42,6 +42,11 @@ class MemCalculator():
         self.step = step
         self.max_clause_freq = max_clause_freq
         self.max_diff_tokens = max_diff_tokens
+        # Cache settings for infinigram API
+        # self.infinigram_timeout = 30
+        self.infinigram_max_retries = 100
+        self._infinigram_cache = {}
+        self._session = requests.Session()
 
     def get_token_id(self) -> List[Dict]:
         """
@@ -113,15 +118,43 @@ class MemCalculator():
         if count_type == 'comb':
             payload['max_clause_freq'] = self.max_clause_freq
             payload['max_diff_tokens'] = self.max_diff_tokens
-        num, flag = 0, 0
-        # Count for 100 time to reduce http error probability
-        while num < 100:
+        # num, flag = 0, 0
+        # # Count for 100 time to reduce http error probability
+        # while num < 100:
+        #     try:
+        #         count = requests.post('https://api.infini-gram.io/', json=payload).json()['count']
+        #         flag = 1
+        #         break
+        #     except:
+        #         num += 1
+        #         continue
+        # count = count if flag == 1 else None
+
+        # Use cache to reduce the number of API calls
+        cache_key = (
+            self.index,
+            count_type,
+            query,
+            self.max_clause_freq,
+            self.max_diff_tokens,
+        )
+        if cache_key in self._infinigram_cache:
+            return self._infinigram_cache[cache_key]
+
+        num = 0
+        count = None
+        # Retry a few times to reduce http error probability
+        while num < self.infinigram_max_retries:
             try:
-                count = requests.post('https://api.infini-gram.io/', json=payload).json()['count']
-                flag = 1
+                response = self._session.post(
+                    'https://api.infini-gram.io/', json=payload,
+                    timeout=self.infinigram_timeout
+                )
+                count = response.json()['count']
                 break
             except:
                 num += 1
                 continue
-        count = count if flag == 1 else None
+
+        self._infinigram_cache[cache_key] = count
         return count
