@@ -1,5 +1,6 @@
 import torch
 import requests
+import logging
 from typing import List, Dict
 from mem_metrics.utils import find_all_substring_indices, is_stop_words
 
@@ -43,7 +44,7 @@ class MemCalculator():
         self.max_clause_freq = max_clause_freq
         self.max_diff_tokens = max_diff_tokens
         # Cache settings for infinigram API
-        # self.infinigram_timeout = 30
+        self.infinigram_timeout = 30
         self.infinigram_max_retries = 100
         self._infinigram_cache = {}
         self._session = requests.Session()
@@ -147,7 +148,8 @@ class MemCalculator():
         while num < self.infinigram_max_retries:
             try:
                 response = self._session.post(
-                    'https://api.infini-gram.io/', json=payload,
+                    'https://api.infini-gram.io/',
+                    json=payload,
                     timeout=self.infinigram_timeout
                 )
                 count = response.json()['count']
@@ -155,6 +157,10 @@ class MemCalculator():
             except:
                 num += 1
                 continue
+
+        if count is None:
+            logging.warning(f"Infinigram API request failed after {self.infinigram_max_retries} retries for query: {query}")
+            count = 0  # Default to 0 if all retries fail
 
         self._infinigram_cache[cache_key] = count
         return count
