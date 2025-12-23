@@ -74,6 +74,8 @@ class MemCalculator():
             start = ele["start"]
             previous_all = self.model_input + self.model_output[:start]
             inputs = self.tokenizer_olmo(previous_all, return_tensors="pt")
+            device = next(self.model.parameters()).device
+            inputs = {key: value.to(device) for key, value in inputs.items()}
             with torch.no_grad():
                 outputs = self.model(**inputs)
             probs = outputs.logits.softmax(dim=-1)
