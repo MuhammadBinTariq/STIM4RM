@@ -1,3 +1,20 @@
+# import argparse
+# import json
+# import os
+# import torch
+# import hashlib
+# import wandb
+# from typing import List, Dict, Any
+# from dataclasses import dataclass
+# from transformers import AutoTokenizer, AutoModelForCausalLM
+
+# # TRL Imports
+# from trl import GRPOTrainer, GRPOConfig
+# import transformers
+# from hf_olmo import OLMoForCausalLM
+# # TRICK: Manually add OLMo class to transformers module to satisfy TRL check
+# setattr(transformers, "OLMoForCausalLM", OLMoForCausalLM)
+
 import argparse
 import json
 import os
@@ -6,9 +23,21 @@ import hashlib
 import wandb
 from typing import List, Dict, Any
 from dataclasses import dataclass
+from datasets import Dataset
+
+# 1. Import Transformers
+import transformers
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-# TRL Imports
+# 2. Import OLMo and HACK it into transformers IMMEDIATELY
+# This must happen before TRL is imported!
+try:
+    from hf_olmo import OLMoForCausalLM
+    setattr(transformers, "OLMoForCausalLM", OLMoForCausalLM)
+except ImportError:
+    print("Warning: hf_olmo not installed.")
+
+# 3. NOW import TRL (It will now see the class exists in transformers)
 from trl import GRPOTrainer, GRPOConfig
 
 # ==============================================================================
@@ -84,6 +113,8 @@ class STIMGRPOTrainer(GRPOTrainer):
     Subclass of GRPOTrainer that adds Token-Level Reward Shaping (STIM).
     """
     def __init__(self, stim_alpha: float, stim_data: Dict[str, Dict[int, float]], tokenizer, **kwargs):
+        if 'ref_model' in kwargs:
+            del kwargs['ref_model']
         super().__init__(**kwargs)
         self.stim_alpha = stim_alpha
         self.stim_data = stim_data # The look-up table for scores
@@ -304,10 +335,13 @@ def main():
             rewards.append(float(r))
 
     unique_prompts = list(set(prompts))
+    ## MAKE DATASET FOR TRL
+    train_dataset = Dataset.from_dict({"prompt": unique_prompts})
     print(f"Loaded {len(prompts)} total rollouts across {len(unique_prompts)} prompts.")
 
     # 2. Setup Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.policy_in)
+    tokenizer = AutoTokenizer.from_pretrained(args.policy_in, trust_remote_code=True)
+    tokenizer.model_input_names = ["input_ids", "attention_mask"] # Required for TRL
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
@@ -348,7 +382,9 @@ def main():
         save_steps=args.steps if args.steps > 0 else 1000, 
         logging_steps=1,
         beta=args.kl_beta,
-        report_to="wandb"
+        report_to="wandb",
+        bf16=True,
+        generation_kwargs={"use_cache": False}
     )
 
     # 4. Initialize Custom Trainer
@@ -356,16 +392,39 @@ def main():
     # but TRL requires the argument.
     def dummy_reward_func(prompts, completions, **kwargs):
         return [0.0] * len(prompts)
+    
+    print(f"Loading model in bfloat16...")
+    model = AutoModelForCausalLM.from_pretrained(
+        args.policy_in, 
+        trust_remote_code=True,
+        torch_dtype=torch.bfloat16
+    )
+
+    # Disable cache in config
+    model.config.use_cache = False
+    if getattr(model, "generation_config", None) is not None:
+        model.generation_config.use_cache = False
+
+    # HARD guarantee: force generate(use_cache=False) no matter what TRL passes
+    _orig_generate = model.generate
+    def _generate_no_cache(*a, **kw):
+        kw["use_cache"] = False
+        return _orig_generate(*a, **kw)
+    model.generate = _generate_no_cache
+
+    print("Disabled use_cache (config + generate monkeypatch).")
 
     trainer = STIMGRPOTrainer(
         stim_alpha=args.stim_alpha,
         stim_data=stim_map,     # Pass the STIM dictionary
         tokenizer=tokenizer,    # Pass tokenizer for decoding
-        model=args.policy_in,
-        ref_model=args.ref_model,
+        # model=args.policy_in,
+        # model=AutoModelForCausalLM.from_pretrained(args.policy_in, trust_remote_code=True),
+        model=model,
+        # ref_model=args.ref_model,
         reward_funcs=dummy_reward_func, # Ignored, data overrides this
         args=training_args,
-        train_dataset=None,     # We will inject dataset via rollout_func
+        train_dataset=train_dataset,     # We will inject dataset via rollout_func
     )
 
     # 5. Inject Rollout Function
