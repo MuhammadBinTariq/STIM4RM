@@ -13,12 +13,12 @@ pip install -q wandb ai2-olmo eval_type_backport
 # ===============================
 # 2. CONFIGURATION (for STIM + GRPO)
 # ===============================
-# MODEL_NAME="olmo_7b_instruct"          # starting SFT/policy
-MODEL_NAME="allenai/OLMo-7B-Instruct"
+MODEL_NAME="olmo_7b_instruct"          # starting SFT/policy
+# MODEL_NAME="allenai/OLMo-7B-Instruct"
 OUT_ROOT="../outputs"
 CKPT_ROOT="../checkpoints"            # where GRPO checkpoints go
 
-NUM_ITERS=5                           # online GRPO iters per task
+NUM_ITERS=2                           # online GRPO iters per task
 PROMPT_BATCH_SIZE=2     # <--- NEW: Number of Prompts per GRPO Update
 NUM_ROLLOUTS=4                        # must match merge pattern in your STIM script
 BATCH_SIZE=2
@@ -134,7 +134,7 @@ for config in "${TASKS[@]}"; do
     # with open('${ITER_DIR}/merged_cot.json','w') as f: json.dump(merged,f,indent=2)
     # "
 
-#         echo "  - Merging rollouts..."
+        # echo "  - Merging rollouts..."
 # python - <<'PY'
 # import json, glob, sys, os
 # run_files = sorted(glob.glob(sys.argv[1]))
@@ -148,16 +148,18 @@ for config in "${TASKS[@]}"; do
 # "${BATCH_WORK_DIR}/merged_cot.json"
 
         echo "  - Merging rollouts..."
-        python -c '
-        import json, glob, sys
-        pattern = sys.argv[1]
-        out = sys.argv[2]
-        run_files = sorted(glob.glob(pattern))
-        merged=[]
-        for p in run_files:
-            with open(p) as f: merged.extend(json.load(f))
-        with open(out,"w") as f: json.dump(merged,f,indent=2)
-        ' "${BATCH_WORK_DIR}/run_*.json" "${BATCH_WORK_DIR}/merged_cot.json"
+        python - "${BATCH_WORK_DIR}/run_*.json" "${BATCH_WORK_DIR}/merged_cot.json" <<'PY'
+import json, glob, sys
+run_files = sorted(glob.glob(sys.argv[1]))
+out = sys.argv[2]
+merged = []
+for p in run_files:
+    with open(p) as f:
+        merged.extend(json.load(f))
+with open(out, 'w') as f:
+    json.dump(merged, f, indent=2)
+PY
+
 
         # ------------------------------------------------
         # 2) EVALUATION & PRM — SAME AS YOUR SCRIPT
@@ -181,35 +183,82 @@ for config in "${TASKS[@]}"; do
         # ------------------------------------------------
         # 3) SPLIT correct/wrong — SAME AS YOUR SCRIPT
         # ------------------------------------------------
-        python -c "
-    import json
-    with open('${BATCH_WORK_DIR}/merged_prm.json') as f:
-      data=json.load(f)
-    # Handle potential key variations for correctness
-    correct=[d for d in data if d.get('is_correct', d.get('correct', 0))==1]
-    wrong=[d for d in data if d.get('is_correct', d.get('correct', 0))==0]
-    with open('${BATCH_WORK_DIR}/sampling_correct.json','w') as f: json.dump(correct,f,indent=2)
-    with open('${BATCH_WORK_DIR}/sampling_wrong.json','w') as f: json.dump(wrong,f,indent=2)
-    "
+        # python -c "
+        # import json
+        # with open('${BATCH_WORK_DIR}/merged_prm.json') as f:
+        #   data=json.load(f)
+        # # Handle potential key variations for correctness
+        # correct=[d for d in data if d.get('is_correct', d.get('correct', 0))==1]
+        # wrong=[d for d in data if d.get('is_correct', d.get('correct', 0))==0]
+        # with open('${BATCH_WORK_DIR}/sampling_correct.json','w') as f: json.dump(correct,f,indent=2)
+        # with open('${BATCH_WORK_DIR}/sampling_wrong.json','w') as f: json.dump(wrong,f,indent=2)
+        # "
+
+        python - <<PY
+import json
+with open('${BATCH_WORK_DIR}/merged_prm.json') as f:
+    data = json.load(f)
+
+# Handle potential key variations for correctness
+correct = [d for d in data if d.get('is_correct', d.get('correct', 0)) == 1]
+wrong = [d for d in data if d.get('is_correct', d.get('correct', 0)) == 0]
+
+with open('${BATCH_WORK_DIR}/sampling_correct.json', 'w') as f:
+    json.dump(correct, f, indent=2)
+with open('${BATCH_WORK_DIR}/sampling_wrong.json', 'w') as f:
+    json.dump(wrong, f, indent=2)
+PY
 
         # ------------------------------------------------
         # 4) TOKEN SELECTION & ALTS — SAME AS YOUR SCRIPT
         # ------------------------------------------------
+        # echo ">>> Selecting Tokens & Alternatives..."
+        # for c in "correct" "wrong"; do
+        #   if [ -s "${BATCH_WORK_DIR}/sampling_${c}.json" ]; then
+        #     python get_tokens.py \
+        #       --model_name ${CUR_POLICY} \
+        #       --f_path "${BATCH_WORK_DIR}/sampling_${c}.json" \
+        #       --output_path "${BATCH_WORK_DIR}/sampling_${c}_tokens.json" \
+        #       --task_type ${TASK_TYPE} \
+        #       --is_cpu
+
+        #     python get_tokens.py \
+        #       --model_name ${CUR_POLICY} \
+        #       --f_path "${BATCH_WORK_DIR}/sampling_${c}_tokens.json" \
+        #       --output_path "${BATCH_WORK_DIR}/sampling_${c}_alter.json" \
+        #       --task_type ${TASK_TYPE}
+        #   fi
+        # done
+
+        # ------------------------------------------------
+        # 4) TOKEN SELECTION & ALTS
+        # ------------------------------------------------
         echo ">>> Selecting Tokens & Alternatives..."
         for c in "correct" "wrong"; do
-          if [ -s "${BATCH_WORK_DIR}/sampling_${c}.json" ]; then
+          SAMP_FILE="${BATCH_WORK_DIR}/sampling_${c}.json"
+          
+          # Check if file exists AND contains actual data (length > 0)
+          # We use a tiny python one-liner for robust JSON parsing
+          HAS_DATA=$(python -c "import json, sys, os; print(1 if os.path.exists(sys.argv[1]) and len(json.load(open(sys.argv[1]))) > 0 else 0)" "$SAMP_FILE" 2>/dev/null || echo 0)
+
+          if [ "$HAS_DATA" -eq "1" ]; then
+            # Step 1: Extract Tokens
             python get_tokens.py \
               --model_name ${CUR_POLICY} \
-              --f_path "${BATCH_WORK_DIR}/sampling_${c}.json" \
+              --f_path "$SAMP_FILE" \
               --output_path "${BATCH_WORK_DIR}/sampling_${c}_tokens.json" \
               --task_type ${TASK_TYPE} \
               --is_cpu
 
-            python get_tokens.py \
-              --model_name ${CUR_POLICY} \
-              --f_path "${BATCH_WORK_DIR}/sampling_${c}_tokens.json" \
-              --output_path "${BATCH_WORK_DIR}/sampling_${c}_alter.json" \
-              --task_type ${TASK_TYPE}
+            if [ -f "${BATCH_WORK_DIR}/sampling_${c}_tokens.json" ]; then
+                python get_tokens.py \
+                  --model_name ${CUR_POLICY} \
+                  --f_path "${BATCH_WORK_DIR}/sampling_${c}_tokens.json" \
+                  --output_path "${BATCH_WORK_DIR}/sampling_${c}_alter.json" \
+                  --task_type ${TASK_TYPE}
+            fi
+          else
+             echo "   ⚠️ Skipping $c processing: No samples found (Accuracy 1.0 or 0.0)."
           fi
         done
 
@@ -374,6 +423,8 @@ PY
 
 done
 
+done
+
 echo "[DONE] Multi-task STIM + GRPO finished."
 
 # ==========================================================
@@ -416,5 +467,3 @@ for config in "${OOD_TASKS[@]}"; do
           --perturbation_type ${PT_TYPE}
   fi
 done
-
-echo "[DONE] Pipeline Finished."
