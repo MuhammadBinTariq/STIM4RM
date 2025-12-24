@@ -206,7 +206,7 @@ class STIMGRPOTrainer(GRPOTrainer):
             
             # Modify the advantage
             # A_total(t) = A_prm + (alpha * S(t))
-            adv_per_token = adv_per_token + (self.stim_alpha * stim_tensor)
+            adv_per_token = adv_per_token - (self.stim_alpha * stim_tensor)
             # adv_per_token = adv_per_token + stim_tensor
             # Metric Calculation
             if stim_tensor.sum() != 0:
