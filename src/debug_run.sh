@@ -12,7 +12,7 @@ CKPT_ROOT="../checkpoints_debug"
 NUM_ITERS=2                        # Run 2 iters to prove the loop cycles correctly
 NUM_ROLLOUTS=2                     # Minimum rollouts
 BATCH_SIZE=1                       # Minimum batch
-MAX_NEW_TOKENS=20                  # Super short generation (instant)
+MAX_NEW_TOKENS=128                 # Super short generation (instant)
 
 # GRPO KNOBS
 LR="1e-6"
