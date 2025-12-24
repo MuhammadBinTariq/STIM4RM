@@ -7,7 +7,7 @@ import json
 from transformers import AutoTokenizer
 from tqdm import tqdm
 from mem_metrics.local_mem import LocalCalculator
-from mem_metrics.kenlm_local_calc import KenLMLocalCalculator
+# from mem_metrics.kenlm_local_calc import KenLMLocalCalculator
 from gen_eval.applied.utils import process_file_path
 
 def local_mem_cal(d, tokenizer_olmo, k=20, index='v4_dolma-v1_7_llama'):
