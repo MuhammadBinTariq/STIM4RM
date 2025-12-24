@@ -122,29 +122,85 @@ class STIMGRPOTrainer(GRPOTrainer):
         We override compute_loss to inject STIM scores into the advantages.
         """
         # 1. Standard Data Extraction from TRL inputs
+        # prompt_ids = inputs["prompt_ids"]
+        # completion_ids = inputs["completion_ids"]
+        # prompt_mask = inputs.get("prompt_mask")
+        # completion_mask = inputs.get("completion_mask")
+        
+        # # TRL calculates sequence-level advantages (A) for us
+        # # Shape: (Batch, Group_Size) -> Flatten to (Batch * Group)
+        # advantages = inputs["advantages"].flatten()
+
+        # # Calculate Mean Task Advantage (Before Penalty)
+        # mean_task_adv = advantages.mean().detach()
+        
+        # # 2. Forward Pass (Current Policy) to get per-token logprobs
+        # # We need to reconstruct input_ids (Prompt + Completion)
+        # B, G, L = completion_ids.shape
+        # flat_prompts = prompt_ids.repeat_interleave(G, dim=0) 
+        # flat_completions = completion_ids.flatten(0, 1)
+        
+        # input_ids = torch.cat([flat_prompts, flat_completions], dim=1)
+        
+        # if prompt_mask is not None:
+        #     flat_p_mask = prompt_mask.repeat_interleave(G, dim=0)
+        #     flat_c_mask = completion_mask.flatten(0, 1)
+        #     attention_mask = torch.cat([flat_p_mask, flat_c_mask], dim=1)
+        # else:
+        #     attention_mask = None
+
+        # 1. Standard Data Extraction from TRL inputs
         prompt_ids = inputs["prompt_ids"]
         completion_ids = inputs["completion_ids"]
         prompt_mask = inputs.get("prompt_mask")
         completion_mask = inputs.get("completion_mask")
         
+        # --- FIX: ROBUST SHAPE HANDLING (2D vs 3D) ---
+        if completion_ids.dim() == 3:
+            # Case 1: (Batch, Group, Length)
+            B, G, L = completion_ids.shape
+            flat_prompts = prompt_ids.repeat_interleave(G, dim=0) 
+            flat_completions = completion_ids.flatten(0, 1)
+            
+            if prompt_mask is not None:
+                flat_p_mask = prompt_mask.repeat_interleave(G, dim=0)
+            else: flat_p_mask = None
+            
+            if completion_mask is not None:
+                flat_c_mask = completion_mask.flatten(0, 1)
+            else: flat_c_mask = None
+            
+        elif completion_ids.dim() == 2:
+            # Case 2: Already flattened (Batch*Group, Length)
+            BG, L = completion_ids.shape
+            flat_completions = completion_ids
+            
+            # Check if prompts match BG dimension or need repeating
+            if prompt_ids.shape[0] != BG:
+                # Likely (Batch, P_Len), needs repeating
+                G = BG // prompt_ids.shape[0]
+                flat_prompts = prompt_ids.repeat_interleave(G, dim=0)
+                if prompt_mask is not None:
+                    flat_p_mask = prompt_mask.repeat_interleave(G, dim=0)
+                else: flat_p_mask = None
+            else:
+                # Already flattened/repeated
+                flat_prompts = prompt_ids
+                flat_p_mask = prompt_mask
+            
+            flat_c_mask = completion_mask # Already flat if provided
+        else:
+            raise ValueError(f"Unexpected completion_ids dimension: {completion_ids.dim()}")
+        # ---------------------------------------------
+        
         # TRL calculates sequence-level advantages (A) for us
-        # Shape: (Batch, Group_Size) -> Flatten to (Batch * Group)
         advantages = inputs["advantages"].flatten()
-
-        # Calculate Mean Task Advantage (Before Penalty)
         mean_task_adv = advantages.mean().detach()
         
-        # 2. Forward Pass (Current Policy) to get per-token logprobs
-        # We need to reconstruct input_ids (Prompt + Completion)
-        B, G, L = completion_ids.shape
-        flat_prompts = prompt_ids.repeat_interleave(G, dim=0) 
-        flat_completions = completion_ids.flatten(0, 1)
-        
+        # 2. Forward Pass...
         input_ids = torch.cat([flat_prompts, flat_completions], dim=1)
         
-        if prompt_mask is not None:
-            flat_p_mask = prompt_mask.repeat_interleave(G, dim=0)
-            flat_c_mask = completion_mask.flatten(0, 1)
+        if flat_p_mask is not None and flat_c_mask is not None:
             attention_mask = torch.cat([flat_p_mask, flat_c_mask], dim=1)
         else:
             attention_mask = None
@@ -234,8 +290,12 @@ class STIMGRPOTrainer(GRPOTrainer):
         pg_loss = -torch.min(part1, part2)
 
         # Mask padding
-        if completion_mask is not None:
-            mask = completion_mask.flatten(0, 1)
+        # if completion_mask is not None:
+        #     mask = completion_mask.flatten(0, 1)
+        #     pg_loss = pg_loss * mask
+        # Mask padding
+        if flat_c_mask is not None:
+            mask = flat_c_mask
             pg_loss = pg_loss * mask
             valid_tokens = mask.sum()
         else:
@@ -356,6 +416,8 @@ def main():
     # training_args = GRPOConfig(
     #     output_dir=args.policy_out,
     #     learning_rate=args.learning_rate,
+        gradient_checkpointing=True,
+        optim="adamw_8bit",
     #     per_device_train_batch_size=args.batch_size,
     #     num_generations=args.num_rollouts,
     #     max_completion_length=args.max_new_tokens,
@@ -370,6 +432,8 @@ def main():
     training_args = GRPOConfig(
         output_dir=args.policy_out,
         learning_rate=args.learning_rate,
+        gradient_checkpointing=True,
+        optim="adamw_8bit",
         per_device_train_batch_size=args.batch_size,
         num_generations=args.num_rollouts,
         max_completion_length=args.max_new_tokens,

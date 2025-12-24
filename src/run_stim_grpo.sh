@@ -80,6 +80,7 @@ for config in "${TASKS[@]}"; do
         --output_dir "${BATCH_DATA_DIR}" \
         --batch_size "${PROMPT_BATCH_SIZE}" \
         --shuffle
+        --limit 10
 
     # Get list of batch files
     BATCH_FILES=($(ls "${BATCH_DATA_DIR}"/batch_*.json | sort -V))
