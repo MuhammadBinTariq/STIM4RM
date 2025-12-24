@@ -5,7 +5,7 @@ set -euo pipefail
 export WANDB_MODE=disabled
 export WANDB_SILENT=true
 echo ">>> 🛡️ Applying Library Patches..."
-python src/apply_patches.py
+python apply_patches.py
 
 echo ">>> 📦 Checking Dependencies..."
 pip install -q wandb ai2-olmo eval_type_backport
@@ -75,7 +75,7 @@ for config in "${TASKS[@]}"; do
     # --- SPLIT DATA INTO BATCHES ---
     echo ">>> Splitting dataset into batches of ${PROMPT_BATCH_SIZE}..."
     BATCH_DATA_DIR="${ITER_DIR}/batches_data"
-    python src/split_data.py \
+    python split_data.py \
         --input "${DATA_PATH}" \
         --output_dir "${BATCH_DATA_DIR}" \
         --batch_size "${PROMPT_BATCH_SIZE}" \
@@ -134,18 +134,30 @@ for config in "${TASKS[@]}"; do
     # with open('${ITER_DIR}/merged_cot.json','w') as f: json.dump(merged,f,indent=2)
     # "
 
+#         echo "  - Merging rollouts..."
+# python - <<'PY'
+# import json, glob, sys, os
+# run_files = sorted(glob.glob(sys.argv[1]))
+# out = sys.argv[2]
+# merged=[]
+# for p in run_files:
+#     with open(p) as f: merged.extend(json.load(f))
+# with open(out,'w') as f: json.dump(merged,f,indent=2)
+# PY \
+# "${BATCH_WORK_DIR}/run_*.json" \
+# "${BATCH_WORK_DIR}/merged_cot.json"
+
         echo "  - Merging rollouts..."
-python - <<'PY'
-import json, glob, sys, os
-run_files = sorted(glob.glob(sys.argv[1]))
-out = sys.argv[2]
-merged=[]
-for p in run_files:
-    with open(p) as f: merged.extend(json.load(f))
-with open(out,'w') as f: json.dump(merged,f,indent=2)
-PY \
-"${BATCH_WORK_DIR}/run_*.json" \
-"${BATCH_WORK_DIR}/merged_cot.json"
+        python -c '
+        import json, glob, sys
+        pattern = sys.argv[1]
+        out = sys.argv[2]
+        run_files = sorted(glob.glob(pattern))
+        merged=[]
+        for p in run_files:
+            with open(p) as f: merged.extend(json.load(f))
+        with open(out,"w") as f: json.dump(merged,f,indent=2)
+        ' "${BATCH_WORK_DIR}/run_*.json" "${BATCH_WORK_DIR}/merged_cot.json"
 
         # ------------------------------------------------
         # 2) EVALUATION & PRM — SAME AS YOUR SCRIPT
