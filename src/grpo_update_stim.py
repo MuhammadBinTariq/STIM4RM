@@ -24,13 +24,10 @@ import wandb
 from typing import List, Dict, Any
 from dataclasses import dataclass
 from datasets import Dataset
-
-# 1. Import Transformers
 import transformers
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-# 2. Import OLMo and HACK it into transformers IMMEDIATELY
-# This must happen before TRL is imported!
+# --- 0. REGISTER OLMO CLASS ---
 try:
     from hf_olmo import OLMoForCausalLM
     setattr(transformers, "OLMoForCausalLM", OLMoForCausalLM)
@@ -432,7 +429,7 @@ def main():
     trainer.rollout_func = make_rollout_func(prompts, completions, rewards)
 
     # 6. Train
-    print("Starting GRPO step...")
+    print("Starting GRPO step (Training)...")
     # We pass the unique prompts as the "dataset" to iterate over
     # TRL will call rollout_func(unique_prompts[batch])
     trainer.train()

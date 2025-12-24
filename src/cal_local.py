@@ -7,6 +7,7 @@ import json
 from transformers import AutoTokenizer
 from tqdm import tqdm
 from mem_metrics.local_mem import LocalCalculator
+from mem_metrics.kenlm_local_calc import KenLMLocalCalculator
 from gen_eval.applied.utils import process_file_path
 
 def local_mem_cal(d, tokenizer_olmo, k=20, index='v4_dolma-v1_7_llama'):
@@ -27,6 +28,19 @@ def local_mem_cal(d, tokenizer_olmo, k=20, index='v4_dolma-v1_7_llama'):
         k=k,
         index=index,
     )
+    # local_cal = KenLMLocalCalculator(
+    #     model_input=model_input,
+    #     model_output=model_output,
+    #     is_correct=is_correct,
+    #     model=None, # might have to keep dolma model here
+    #     tokenizer_olmo=tokenizer_olmo,
+    #     task_type="",
+    #     step="",
+    #     k=k,
+    #     index=index,
+    #     k=20,
+    #     kenlm_path="/path/to/dolma.bin",  # <-- YOUR KENLM BIN
+    # )
     token_alternative_ls = d['token_alternative_fre']
     token_alternative_fre_ls = local_cal.get_fre(token_alternative_ls)
     token_alternative_fre_ls = local_cal.cal_score(token_alternative_fre_ls)

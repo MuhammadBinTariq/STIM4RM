@@ -1,16 +1,26 @@
 #!/bin/bash
 set -euo pipefail
 
-# ==========================================================
-# CONFIGURATION (match your existing run_multi_task_stim.sh)
-# ==========================================================
-MODEL_NAME="olmo_7b_instruct"          # starting SFT/policy
+# 1. APPLY PATCHES & INSTALL DEPS
+export WANDB_MODE=disabled
+export WANDB_SILENT=true
+echo ">>> 🛡️ Applying Library Patches..."
+python src/apply_patches.py
+
+echo ">>> 📦 Checking Dependencies..."
+pip install -q wandb ai2-olmo eval_type_backport
+
+# ===============================
+# 2. CONFIGURATION (for STIM + GRPO)
+# ===============================
+# MODEL_NAME="olmo_7b_instruct"          # starting SFT/policy
+MODEL_NAME="allenai/OLMo-7B-Instruct"
 OUT_ROOT="../outputs"
 CKPT_ROOT="../checkpoints"            # where GRPO checkpoints go
 
 NUM_ITERS=5                           # online GRPO iters per task
 NUM_ROLLOUTS=4                        # must match merge pattern in your STIM script
-BATCH_SIZE=1
+BATCH_SIZE=2
 
 # GRPO knobs
 LR="1e-6"
