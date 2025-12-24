@@ -1,4 +1,5 @@
 from typing import List, Dict
+from concurrent.futures import ThreadPoolExecutor
 from scipy.stats import spearmanr
 from mem_metrics.mem import MemCalculator
 
@@ -54,11 +55,15 @@ class LocalCalculator(MemCalculator):
         """
         if len(token_alternative_ls) == 0:
             return []
-        token_alternative_fre_ls = []
-        for ele in token_alternative_ls:
-            start = ele["start"]
+        # token_alternative_fre_ls = []
+        # for ele in token_alternative_ls:
+        #     start = ele["start"]
+        def process_token(ele: Dict) -> Dict:
+            entry = dict(ele)
+            start = entry["start"]
             token_all = self.tokenizer_olmo.encode(self.model_input + self.model_output[:start])
-            token_all.append(self.tokenizer_olmo.convert_tokens_to_ids(ele["token"]))
+            # token_all.append(self.tokenizer_olmo.convert_tokens_to_ids(ele["token"]))
+            token_all.append(self.tokenizer_olmo.convert_tokens_to_ids(entry["token"]))
             # Find the longest prefix with non-zero frequency
             seq_start = len(token_all)-1
             seq_dy = self.tokenizer_olmo.decode(token_all[seq_start:])
@@ -70,14 +75,19 @@ class LocalCalculator(MemCalculator):
                 seq_fre = self.infinigram_count(seq_dy, 'single')
                 if seq_fre > 0:
                     seq = seq_dy
-                    ele['fre'] = seq_fre
+                    # ele['fre'] = seq_fre
+                    entry['fre'] = seq_fre
             token_id_seq = self.tokenizer_olmo.encode(seq)
-            ele["longest_nonzero_seq"] = seq
-            if 'fre' not in ele:
-                ele['fre'] = 0
+            # ele["longest_nonzero_seq"] = seq
+            # if 'fre' not in ele:
+            #     ele['fre'] = 0
+            entry["longest_nonzero_seq"] = seq
+            if 'fre' not in entry:
+                entry['fre'] = 0
 
             # Get the frequency for each alternative tokens
-            alternative_tokens = ele["alternative_tokens"]
+            # alternative_tokens = ele["alternative_tokens"]
+            alternative_tokens = [dict(at) for at in entry["alternative_tokens"]]
             for j, at in enumerate(alternative_tokens):
                 al_token_id = self.tokenizer_olmo.convert_tokens_to_ids(at["al_token"])
                 token_id_seq[-1] = al_token_id
@@ -85,8 +95,14 @@ class LocalCalculator(MemCalculator):
                 fre = self.infinigram_count(al_seq, 'single')
                 alternative_tokens[j]["al_seq"] = al_seq
                 alternative_tokens[j]["fre"] = fre
-            ele["alternative_tokens"] = alternative_tokens
-            token_alternative_fre_ls.append(ele)
+            # ele["alternative_tokens"] = alternative_tokens
+            # token_alternative_fre_ls.append(ele)
+            entry["alternative_tokens"] = alternative_tokens
+            return entry
+        
+        with ThreadPoolExecutor() as executor:
+            token_alternative_fre_ls = list(executor.map(process_token, token_alternative_ls))
+
         return token_alternative_fre_ls
     
     def cal_score(self, token_alternative_fre_ls: List[Dict]) -> List[Dict]:

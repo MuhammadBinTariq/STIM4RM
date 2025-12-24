@@ -2,6 +2,7 @@ import torch
 import requests
 import logging
 from typing import List, Dict
+from threading import Lock, local
 from mem_metrics.utils import find_all_substring_indices, is_stop_words
 
 class MemCalculator():
@@ -45,9 +46,17 @@ class MemCalculator():
         self.max_diff_tokens = max_diff_tokens
         # Cache settings for infinigram API
         self.infinigram_timeout = 30
-        self.infinigram_max_retries = 100
+        self.infinigram_max_retries = 5
         self._infinigram_cache = {}
-        self._session = requests.Session()
+        self._cache_lock = Lock()
+        self._session_local = local()
+
+    def _get_session(self):
+        session = getattr(self._session_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            self._session_local.session = session
+        return session
 
     def get_token_id(self) -> List[Dict]:
         """
@@ -139,18 +148,20 @@ class MemCalculator():
             self.max_clause_freq,
             self.max_diff_tokens,
         )
-        if cache_key in self._infinigram_cache:
-            return self._infinigram_cache[cache_key]
+        with self._cache_lock:
+            if cache_key in self._infinigram_cache:
+                return self._infinigram_cache[cache_key]
 
         num = 0
         count = None
         # Retry a few times to reduce http error probability
         while num < self.infinigram_max_retries:
             try:
-                response = self._session.post(
+                session = self._get_session()
+                response = session.post(
                     'https://api.infini-gram.io/',
                     json=payload,
-                    timeout=self.infinigram_timeout
+                    timeout=self.infinigram_timeout,
                 )
                 count = response.json()['count']
                 break
@@ -162,5 +173,6 @@ class MemCalculator():
             logging.warning(f"Infinigram API request failed after {self.infinigram_max_retries} retries for query: {query}")
             count = 0  # Default to 0 if all retries fail
 
-        self._infinigram_cache[cache_key] = count
+        with self._cache_lock:
+            self._infinigram_cache[cache_key] = count
         return count
