@@ -74,6 +74,12 @@ for config in "${TASKS[@]}"; do
     # Merge
     python -c "import json, glob; merged=[]; [merged.extend(json.load(open(p))) for p in glob.glob('${ITER_DIR}/run_*.json')]; json.dump(merged, open('${ITER_DIR}/merged_cot.json','w'), indent=2)"
 
+    # 1.5 EVALUATION (Crucial Fix: Adds 'is_correct' to the JSON)
+    echo ">>> Evaluating..."
+    python ./gen_eval/${TASK_TYPE}/evaluate.py \
+      --model_output_path "${ITER_DIR}/merged_cot.json" \
+      --perturbation_type ${PT_TYPE}
+      
     # 2. EVAL & REWARD
     echo ">>> PRM Scoring..."
     python get_reward.py --f_path "${ITER_DIR}/merged_cot.json" --output_path "${ITER_DIR}/merged_prm.json" --task_type ${TASK_TYPE}
