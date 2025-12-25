@@ -416,8 +416,8 @@ def main():
     # training_args = GRPOConfig(
     #     output_dir=args.policy_out,
     #     learning_rate=args.learning_rate,
-        gradient_checkpointing=True,
-        optim="adamw_8bit",
+    #     gradient_checkpointing=True,
+    #     optim="adamw_8bit",
     #     per_device_train_batch_size=args.batch_size,
     #     num_generations=args.num_rollouts,
     #     max_completion_length=args.max_new_tokens,

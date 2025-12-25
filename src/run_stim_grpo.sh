@@ -79,7 +79,7 @@ for config in "${TASKS[@]}"; do
         --input "${DATA_PATH}" \
         --output_dir "${BATCH_DATA_DIR}" \
         --batch_size "${PROMPT_BATCH_SIZE}" \
-        --shuffle
+        --shuffle \
         --limit 10
 
     # Get list of batch files
