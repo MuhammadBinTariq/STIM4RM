@@ -6,7 +6,6 @@ import torch
 import json
 import re
 import argparse
-import transformers
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from nltk.tokenize import sent_tokenize
 from tqdm import tqdm
@@ -72,22 +71,6 @@ def get_tokenizer_model(model_id):
     model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
     return tokenizer, model
 
-# GRPO uses allenai/OLMo-2-1124-7B-RM as reward model
-def get_rm_model(model_id):
-    """
-    Load the reward model (e.g., allenai/OLMo-2-1124-7B-RM).
-    We use AutoModelForSequenceClassification to obtain a single scalar score.
-    """
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    tokenizer.pad_token = tokenizer.eos_token
-    # For RM scoring we want to preserve the left context of the prompt;
-    # right-side truncation keeps the prompt and early completion tokens.
-    tokenizer.padding_side = 'right'
-    tokenizer.truncation_side = 'right'
-    model = transformers.AutoModelForSequenceClassification.from_pretrained(model_id, device_map="auto")
-    model.eval()
-    return tokenizer, model
-
 def cal_prm(prompt, model_output, tokenizer_prm, model_prm, tokenize_method):
     """
     Given the prompt and the model output, return the prm score for each reasoning step
@@ -150,48 +133,19 @@ def cal_prm_fine_grained(prompt, pr_score: List[Dict], tokenizer_prm, model_prm,
             score_ls.append({"step": step, "step_probs": step_probs})
     return score_ls
 
-def score_with_rm(prompt: str, completion: str, tokenizer_rm, model_rm) -> float:
-    """
-    Compute a scalar reward from the reward model. We assume the RM exposes a
-    single-logit or 2-class head. We return the raw logit (single head) or
-    the logit for the "preferred" class (index 1) without averaging, to avoid
-    collapsing variation across examples.
-    """
-    # Join prompt/completion with a separator to preserve both in truncation.
-    text = prompt + "\n\n" + completion
-    encoded = tokenizer_rm(
-        text,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-    ).to(model_rm.device)
-    with torch.no_grad():
-        outputs = model_rm(**encoded)
-        logits = outputs.logits
-        if logits.shape[-1] == 1:
-            reward = logits.squeeze(-1)[0].item()
-        else:
-            reward = logits[0, 1].item()
-    return float(reward)
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--f_path', type=str, required=True, help="File path of model's inference result (generation + evaluation)")
     parser.add_argument('--model_id_prm', type=str, default='UW-Madison-Lee-Lab/VersaPRM', help="The model id for process reward model")
-    parser.add_argument('--model_id_rm', type=str, default='allenai/OLMo-2-1124-7B-RM', help="The model id for the policy reward model")
     parser.add_argument('--output_path', type=str, required=True, help="Output file path containing model's prm score for each reasoning step")
     parser.add_argument('--batch_size', type=int, default=20, help="Batch size for calculation")
     parser.add_argument('--task_type', type=str, choices=["applied", "formula", "counting", "cap"], help="Name of reasoning task")
     parser.add_argument('--tokenize_method', type=str, choices=["sen", "new_line"], default="sen", help="Delimiter to separate model's reasoning step")
     args = parser.parse_args()
     logging.basicConfig(filename="prm.log", level=logging.INFO)
-    # logging.info(f"Running on prm: {args.model_id_prm}, path: {args.f_path}")
-    logging.info(
-        f"Running on prm: {args.model_id_prm}, rm: {args.model_id_rm}, path: {args.f_path}"
-    )
+    logging.info(f"Running on prm: {args.model_id_prm}, path: {args.f_path}")
 
     tokenizer_prm, model_prm = get_tokenizer_model(args.model_id_prm)
-    tokenizer_rm, model_rm = get_rm_model(args.model_id_rm)
     with open(args.f_path) as f:
         all_d = json.load(f)
     result_ls = []
@@ -204,7 +158,6 @@ if __name__ == '__main__':
         if '\n' in selected_step:
             pr_score = cal_prm_fine_grained(prompt, pr_score, tokenizer_prm, model_prm, selected_step)
         d['pr_score'] = pr_score
-        d['rm_reward'] = score_with_rm(prompt, d["model_output"], tokenizer_rm, model_rm)
         result_ls.append(d)
         if (i + 1) % args.batch_size == 0 or i == len(all_d) - 1:
             with open(args.output_path, 'a') as f:
