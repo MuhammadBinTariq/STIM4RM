@@ -374,6 +374,16 @@ PY
 
 
     # =======================
+    # SAVE ITERATION-FINAL CHECKPOINT
+    # =======================
+    if [ -n "${NEXT_CKPT:-}" ] && [ -d "${NEXT_CKPT}" ]; then
+      FINAL_ITER_CKPT="${CKPT_ROOT}/${TASK_TYPE}_iter_${iter}_final"
+      ln -sfn "$(realpath "${NEXT_CKPT}")" "${FINAL_ITER_CKPT}"
+      CUR_POLICY="${FINAL_ITER_CKPT}"
+      echo ">>> Saved iteration-final checkpoint: ${FINAL_ITER_CKPT}"
+    fi
+
+    # =======================
     # MERGE BATCH RESULTS FOR MAA (PER ITER)
     # =======================
     echo ">>> Merging batch PRM + STIM results for iter ${iter} (for MAA only)..."
