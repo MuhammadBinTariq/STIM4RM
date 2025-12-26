@@ -80,9 +80,12 @@ def get_rm_model(model_id):
     """
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = 'left'
-    tokenizer.truncation_side = 'left'
-    model = transformers.AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+    # For RM scoring we want to preserve the left context of the prompt;
+    # right-side truncation keeps the prompt and early completion tokens.
+    tokenizer.padding_side = 'right'
+    tokenizer.truncation_side = 'right'
+    model = transformers.AutoModelForSequenceClassification.from_pretrained(model_id, device_map="auto")
+    model.eval()
     return tokenizer, model
 
 def cal_prm(prompt, model_output, tokenizer_prm, model_prm, tokenize_method):
@@ -150,11 +153,14 @@ def cal_prm_fine_grained(prompt, pr_score: List[Dict], tokenizer_prm, model_prm,
 def score_with_rm(prompt: str, completion: str, tokenizer_rm, model_rm) -> float:
     """
     Compute a scalar reward from the reward model. We assume the RM exposes a
-    single-logit or 2-class head; we return the first logit if single-class,
-    otherwise the probability of the "preferred" class (index 1).
+    single-logit or 2-class head. We return the raw logit (single head) or
+    the logit for the "preferred" class (index 1) without averaging, to avoid
+    collapsing variation across examples.
     """
+    # Join prompt/completion with a separator to preserve both in truncation.
+    text = prompt + "\n\n" + completion
     encoded = tokenizer_rm(
-        prompt + completion,
+        text,
         return_tensors="pt",
         padding=True,
         truncation=True,
@@ -163,10 +169,9 @@ def score_with_rm(prompt: str, completion: str, tokenizer_rm, model_rm) -> float
         outputs = model_rm(**encoded)
         logits = outputs.logits
         if logits.shape[-1] == 1:
-            reward = logits.squeeze(-1).mean().item()
+            reward = logits.squeeze(-1)[0].item()
         else:
-            probs = torch.softmax(logits, dim=-1)
-            reward = probs[:, 1].mean().item()
+            reward = logits[0, 1].item()
     return float(reward)
 
 if __name__ == '__main__':
