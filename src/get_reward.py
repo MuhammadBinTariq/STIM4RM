@@ -82,9 +82,7 @@ def get_rm_model(model_id):
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = 'left'
     tokenizer.truncation_side = 'left'
-    model = transformers.AutoModelForSequenceClassification.from_pretrained(
-        model_id, device_map="auto"
-    )
+    model = transformers.AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
     return tokenizer, model
 
 def cal_prm(prompt, model_output, tokenizer_prm, model_prm, tokenize_method):
