@@ -21,7 +21,7 @@ CKPT_ROOT="../checkpoints"            # where GRPO checkpoints go
 NUM_ITERS=2                           # online GRPO iters per task
 PROMPT_BATCH_SIZE=2     # <--- NEW: Number of Prompts per GRPO Update
 NUM_ROLLOUTS=4                        # must match merge pattern in your STIM script
-BATCH_SIZE=2
+BATCH_SIZE=4
 
 # GRPO knobs
 LR="1e-6"
