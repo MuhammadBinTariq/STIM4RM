@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datasets import Dataset
 import transformers
 from transformers import AutoTokenizer, AutoModelForCausalLM
+import logging
 
 # --- 0. REGISTER OLMO CLASS ---
 try:
@@ -100,6 +101,24 @@ def load_stim_scores(path: str) -> Dict[str, Dict[int, float]]:
             stim_map[key] = token_map
             
     return stim_map
+
+def extract_prm_reward(item: Dict[str, Any]) -> float:
+    """
+    Compute the proxy reward for a rollout by averaging VersaPRM step scores.
+    Falls back to top-level reward fields if step scores are missing.
+    """
+    pr_steps = item.get("pr_score", [])
+    step_vals = []
+    for step in pr_steps:
+        if isinstance(step, dict):
+            val = step.get("step_probs")
+            if val is not None:
+                step_vals.append(float(val))
+    if step_vals:
+        return float(sum(step_vals) / len(step_vals))
+    # return float(item.get("reward", item.get("prm_score", item.get("final_score", 0.0))))
+    logging.warning("No PR step scores found; defaulting reward to 0.0")
+    return 0.0    
 
 # ==============================================================================
 # 2. CUSTOM TRAINER (The Core Logic)
@@ -193,9 +212,9 @@ class STIMGRPOTrainer(GRPOTrainer):
             raise ValueError(f"Unexpected completion_ids dimension: {completion_ids.dim()}")
         # ---------------------------------------------
         
-        # TRL calculates sequence-level advantages (A) for us
-        advantages = inputs["advantages"].flatten()
-        mean_task_adv = advantages.mean().detach()
+        # # TRL calculates sequence-level advantages (A) for us
+        # advantages = inputs["advantages"].flatten()
+        # mean_task_adv = advantages.mean().detach()
         
         # 2. Forward Pass...
         input_ids = torch.cat([flat_prompts, flat_completions], dim=1)
@@ -206,6 +225,44 @@ class STIMGRPOTrainer(GRPOTrainer):
             attention_mask = None
 
         outputs = model(input_ids, attention_mask=attention_mask)
+
+        # Decode prompts/completions for reward & STIM lookups
+        prompts_text = self.processing_class.batch_decode(flat_prompts, skip_special_tokens=True)
+        comps_text = self.processing_class.batch_decode(flat_completions, skip_special_tokens=True)
+
+        # Compute proxy rewards from inputs (populated via reward_funcs/rollouts)
+        if "rewards" not in inputs:
+            raise ValueError("Expected 'rewards' in inputs for GRPO advantages.")
+
+        raw_rewards = inputs["rewards"]
+        reward_tensor = torch.as_tensor(raw_rewards, device=model.device, dtype=torch.float32)
+        proxy_rewards = reward_tensor.flatten()
+
+        # Per-prompt mean across num_generations rollouts (R_i - \bar{R}_prompt)
+        reward_matrix = None
+        if reward_tensor.dim() == 2:
+            reward_matrix = reward_tensor
+        elif completion_ids.dim() == 3:
+            reward_matrix = reward_tensor.view(B, G)
+        else:
+            # Try to infer grouping
+            if prompt_ids.shape[0] != proxy_rewards.numel() and proxy_rewards.numel() % prompt_ids.shape[0] == 0:
+                G = proxy_rewards.numel() // prompt_ids.shape[0]
+                reward_matrix = proxy_rewards.view(prompt_ids.shape[0], G)
+            else:
+                num_gen = getattr(self.args, "num_generations", None)
+                if num_gen and proxy_rewards.numel() % num_gen == 0:
+                    reward_matrix = proxy_rewards.view(proxy_rewards.numel() // num_gen, num_gen)
+
+        if reward_matrix is not None:
+            prompt_means = reward_matrix.mean(dim=1, keepdim=True)
+            advantages = (reward_matrix - prompt_means).reshape(-1)
+        else:
+            # Fallback to global mean if grouping cannot be inferred
+            mean_task_adv = proxy_rewards.mean().detach()
+            advantages = proxy_rewards - mean_task_adv
+
+        mean_task_adv = advantages.mean().detach()
         
         # Extract logits for the completion part only
         # logits shape: (B*G, Total_Len, Vocab)
@@ -249,8 +306,8 @@ class STIMGRPOTrainer(GRPOTrainer):
             
             # Decode prompts and completions to keys
             # Note: This adds overhead but guarantees alignment without complex data collators
-            prompts_text = self.processing_class.batch_decode(flat_prompts, skip_special_tokens=True)
-            comps_text = self.processing_class.batch_decode(flat_completions, skip_special_tokens=True)
+            # prompts_text = self.processing_class.batch_decode(flat_prompts, skip_special_tokens=True)
+            # comps_text = self.processing_class.batch_decode(flat_completions, skip_special_tokens=True)
             
             for i, (p_txt, c_txt) in enumerate(zip(prompts_text, comps_text)):
                 key = stable_hash(p_txt + c_txt)
@@ -278,7 +335,8 @@ class STIMGRPOTrainer(GRPOTrainer):
                 "train/task_advantage": mean_task_adv,
                 "train/final_advantage": mean_final_adv,
                 "train/stim_delta": delta,  # <--- THIS IS THE METRIC YOU NEED
-                "train/mean_stim_rho": mean_rho
+                "train/mean_stim_rho": mean_rho,
+                "train/proxy_reward_mean": proxy_rewards.mean().detach() if proxy_rewards is not None else 0.0
             })
         # >>>>>> END STIM INJECTION <<<<<<
 
@@ -375,6 +433,7 @@ def main():
     stim_map = {}
     stim_map.update(load_stim_scores(args.stim_correct))
     stim_map.update(load_stim_scores(args.stim_wrong))
+    reward_map: Dict[str, float] = {}
     
     # Organize data for rollout_func
     # We need lists of prompts, completions, and PRM rewards
@@ -384,12 +443,14 @@ def main():
         p = item.get("prompt", item.get("question", item.get("input", "")))
         c = item.get("model_output", item.get("completion", item.get("response", "")))
         # Handle reward key variations
-        r = item.get("reward", item.get("prm_score", item.get("final_score", 0.0)))
+        # r = item.get("reward", item.get("prm_score", item.get("final_score", 0.0)))
+        r = extract_prm_reward(item)
         
         if p and c:
             prompts.append(p)
             completions.append(c)
             rewards.append(float(r))
+            reward_map[stable_hash(p + c)] = float(r)
 
     unique_prompts = list(set(prompts))
     ## MAKE DATASET FOR TRL
@@ -451,8 +512,10 @@ def main():
     # 4. Initialize Custom Trainer
     # We define a dummy reward_func because we pass pre-computed rewards in rollout_func
     # but TRL requires the argument.
-    def dummy_reward_func(prompts, completions, **kwargs):
-        return [0.0] * len(prompts)
+    # def dummy_reward_func(prompts, completions, **kwargs):
+    #     return [0.0] * len(prompts)
+    def prm_reward_func(prompts, completions, **kwargs):
+        return [reward_map.get(stable_hash(p + c), 0.0) for p, c in zip(prompts, completions)]
     
     print(f"Loading model in bfloat16...")
     model = AutoModelForCausalLM.from_pretrained(
@@ -483,7 +546,8 @@ def main():
         # model=AutoModelForCausalLM.from_pretrained(args.policy_in, trust_remote_code=True),
         model=model,
         # ref_model=args.ref_model,
-        reward_funcs=dummy_reward_func, # Ignored, data overrides this
+        # reward_funcs=dummy_reward_func, # Ignored, data overrides this
+        reward_funs=prm_reward_func,
         args=training_args,
         train_dataset=train_dataset,     # We will inject dataset via rollout_func
     )
