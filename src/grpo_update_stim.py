@@ -458,7 +458,14 @@ def main():
     print(f"Loaded {len(prompts)} total rollouts across {len(unique_prompts)} prompts.")
 
     # 2. Setup Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.policy_in, trust_remote_code=True)
+    # tokenizer = AutoTokenizer.from_pretrained(args.policy_in, trust_remote_code=True)
+    if args.policy_in == "olmo_7b_instruct":
+        tokenizer_repo = "allenai/OLMo-2-1124-7B-Instruct"
+    elif args.policy_in == "olmo_13b_instruct":
+        tokenizer_repo = "allenai/OLMo-2-1124-13B-Instruct"
+    else:
+        tokenizer_repo = "allenai/OLMo-2-1124-7B-Instruct"  # Default/fallback
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_repo, trust_remote_code=True)
     tokenizer.model_input_names = ["input_ids", "attention_mask"] # Required for TRL
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -518,8 +525,16 @@ def main():
         return [reward_map.get(stable_hash(p + c), 0.0) for p, c in zip(prompts, completions)]
     
     print(f"Loading model in bfloat16...")
+
+    if args.policy_in == "olmo_7b_instruct":
+        model_repo = "allenai/OLMo-2-1124-7B-Instruct"
+    elif args.policy_in == "olmo_13b_instruct":
+        model_repo = "allenai/OLMo-2-1124-13B-Instruct"
+    else:
+        model_repo = args.policy_in  # Use as-is
+
     model = AutoModelForCausalLM.from_pretrained(
-        args.policy_in, 
+        model_repo, 
         trust_remote_code=True,
         torch_dtype=torch.bfloat16
     )
