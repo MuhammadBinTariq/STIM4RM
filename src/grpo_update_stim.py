@@ -562,7 +562,7 @@ def main():
         model=model,
         # ref_model=args.ref_model,
         # reward_funcs=dummy_reward_func, # Ignored, data overrides this
-        reward_funs=prm_reward_func,
+        reward_funcs=prm_reward_func,
         args=training_args,
         train_dataset=train_dataset,     # We will inject dataset via rollout_func
     )
