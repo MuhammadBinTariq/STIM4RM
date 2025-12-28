@@ -129,7 +129,7 @@ class STIMGRPOTrainer(GRPOTrainer):
     Subclass of GRPOTrainer that adds Token-Level Reward Shaping (STIM).
     """
     # def __init__(self, stim_alpha: float, stim_data: Dict[str, Dict[int, float]], tokenizer, **kwargs):
-    def __init__(self, stim_alpha: float, stim_data: Dict[str, Dict[int, float]], tokenizer, reward_map: Dict[str, float] | None = None, **kwargs):
+    def __init__(self, stim_alpha: float, stim_data: Dict[str, Dict[int, float]], tokenizer, reward_map: Dict[str, float], **kwargs):
         if 'ref_model' in kwargs:
             del kwargs['ref_model']
         super().__init__(**kwargs)
