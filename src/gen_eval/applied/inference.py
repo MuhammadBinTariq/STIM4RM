@@ -135,7 +135,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str, required=True, help="The path of data")
     # parser.add_argument('--model_name', type=str, required=True, choices=["olmo_13b_instruct", "olmo_7b_instruct"], default="olmo_13b_instruct", help="model to inference")
-    parser.add_argument('--model_name', type=str, required=True, default="olmo_13b_instruct", help="model to inference (alias, HF id, or local checkpoint path)")
+    parser.add_argument('--model_name', type=str, required=True, default="olmo_7b_instruct", help="model to inference (alias, HF id, or local checkpoint path)")
     parser.add_argument('--output_path', type=str, required=True, help="The path of model generation result")
     parser.add_argument('--perturbation_type', type=str, choices=["original", "changing_base", "digit_expand", "int_to_float"], default="original", help="The distributional type")
     parser.add_argument('--few_shot_path', type=str, required=True, help="The file path of few shot examples")

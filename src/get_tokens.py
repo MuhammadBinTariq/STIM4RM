@@ -62,9 +62,13 @@ if __name__ == "__main__":
     elif args.model_name == "olmo_7b_instruct":
         model_name = "allenai/OLMo-2-1124-7B-Instruct"
     else:
-        raise ValueError(f"Invalid model_name!")
-    tokenizer_olmo = AutoTokenizer.from_pretrained(model_name)
+        model_name = args.model_name
+        
+    tokenizer_olmo = AutoTokenizer.from_pretrained("allenai/OLMo-2-1124-7B-Instruct")
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto") if not args.is_cpu else ""
+    #     raise ValueError(f"Invalid model_name!")
+    # tokenizer_olmo = AutoTokenizer.from_pretrained(model_name)
+    # model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto") if not args.is_cpu else ""
     
     with open(args.f_path) as f:
         all_d = json.load(f)
