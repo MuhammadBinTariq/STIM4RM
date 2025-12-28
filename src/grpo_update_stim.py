@@ -128,13 +128,15 @@ class STIMGRPOTrainer(GRPOTrainer):
     """
     Subclass of GRPOTrainer that adds Token-Level Reward Shaping (STIM).
     """
-    def __init__(self, stim_alpha: float, stim_data: Dict[str, Dict[int, float]], tokenizer, **kwargs):
+    # def __init__(self, stim_alpha: float, stim_data: Dict[str, Dict[int, float]], tokenizer, **kwargs):
+    def __init__(self, stim_alpha: float, stim_data: Dict[str, Dict[int, float]], tokenizer, reward_map: Dict[str, float] | None = None, **kwargs):
         if 'ref_model' in kwargs:
             del kwargs['ref_model']
         super().__init__(**kwargs)
         self.stim_alpha = stim_alpha
         self.stim_data = stim_data # The look-up table for scores
         self.processing_class = tokenizer # Store tokenizer for decoding in loss
+        self.reward_map = reward_map or {}
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -231,10 +233,14 @@ class STIMGRPOTrainer(GRPOTrainer):
         comps_text = self.processing_class.batch_decode(flat_completions, skip_special_tokens=True)
 
         # Compute proxy rewards from inputs (populated via reward_funcs/rollouts)
-        if "rewards" not in inputs:
-            raise ValueError("Expected 'rewards' in inputs for GRPO advantages.")
+        if "rewards" in inputs:
+            raw_rewards = inputs["rewards"]
+        elif "rewards" in inputs.get("chosen_completions", {}):
+            raw_rewards = inputs["chosen_completions"]["rewards"]
+        else:
+            # Fallback: reconstruct from reward_map if available
+            raw_rewards = [self.reward_map.get(stable_hash(p_txt + c_txt), 0.0) for p_txt, c_txt in zip(prompts_text, comps_text)]
 
-        raw_rewards = inputs["rewards"]
         reward_tensor = torch.as_tensor(raw_rewards, device=model.device, dtype=torch.float32)
         proxy_rewards = reward_tensor.flatten()
 
@@ -556,6 +562,7 @@ def main():
     trainer = STIMGRPOTrainer(
         stim_alpha=args.stim_alpha,
         stim_data=stim_map,     # Pass the STIM dictionary
+        reward_map=reward_map, # Pass reward map for fallback
         tokenizer=tokenizer,    # Pass tokenizer for decoding
         # model=args.policy_in,
         # model=AutoModelForCausalLM.from_pretrained(args.policy_in, trust_remote_code=True),
