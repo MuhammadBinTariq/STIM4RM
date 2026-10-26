@@ -36,7 +36,7 @@ from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import Whitespace
 from transformers import Olmo2Config, Olmo2ForCausalLM, PreTrainedTokenizerFast
 
-from src.rewardmaxxing.cache import InfiniGramClient, QueryFailure, SQLiteCache
+from src.rewardmaxxing.cache import HTTPTransport, InfiniGramClient, QueryFailure, SQLiteCache
 from src.rewardmaxxing.checkpoints import load_training_state, save_checkpoint, seed_all
 from src.rewardmaxxing.config import StimConfig, TrainConfig
 from src.rewardmaxxing.data import validate_splits
@@ -96,6 +96,35 @@ def config(weight=0.2):
 
 
 class SmokeTests(unittest.TestCase):
+    def test_http_access_denial_stops_retries_and_other_workers(self):
+        from unittest.mock import Mock, patch
+        import requests
+        for status in (401, 403):
+            with self.subTest(status=status):
+                response = requests.Response()
+                response.status_code = status
+                response._content = b'{"error":"request denied"}'
+                response.headers["Content-Type"] = "application/json"
+                response.headers["X-Request-ID"] = "fixture-request"
+                session = Mock()
+                session.post.return_value = response
+                with patch("requests.Session", return_value=session), patch("time.sleep") as sleep:
+                    transport = HTTPTransport()
+                    try:
+                        with self.assertRaises(QueryFailure) as caught:
+                            transport({"query_ids": [1]})
+                        self.assertIn(f"HTTP {status}", str(caught.exception))
+                        self.assertIn("request denied", str(caught.exception))
+                        self.assertIn("fixture-request", str(caught.exception))
+                        with ThreadPoolExecutor(max_workers=1) as pool:
+                            pending = pool.submit(transport, {"query_ids": [2]})
+                            with self.assertRaises(QueryFailure):
+                                pending.result()
+                        self.assertEqual(session.post.call_count, 1)
+                        sleep.assert_not_called()
+                    finally:
+                        transport.close()
+
     def test_atomic_replace_retries_only_windows_locks(self):
         from unittest.mock import patch
         from src.rewardmaxxing.checkpoints import atomic_replace

@@ -83,6 +83,7 @@ class HTTPTransport:
         self.local = threading.local()
         self.sessions = []
         self.lock = threading.Lock()
+        self.access_denial = None
 
     def __call__(self, payload):
         import requests
@@ -92,10 +93,26 @@ class HTTPTransport:
                 self.sessions.append(self.local.session)
         last_error = None
         for attempt in range(self.attempts):
+            # A denial applies to this transport's remaining work too. Requests
+            # already in flight may finish; queued work must not keep retrying.
+            with self.lock:
+                if self.access_denial is not None:
+                    raise QueryFailure(self.access_denial)
             retry_after = 0.0
             try:
                 response = self.local.session.post("https://api.infini-gram.io/",
                                                    json=payload, timeout=self.timeout)
+                if response.status_code in (401, 403):
+                    headers = {key: response.headers[key][:80] for key in
+                               ("Content-Type", "Retry-After", "Server", "CF-Ray", "X-Request-ID")
+                               if key in response.headers}
+                    body = " ".join(response.text[:1000].split())[:200]
+                    message = (f"Infini-gram HTTP {response.status_code}: access denied; "
+                               f"further HTTP requests stopped for this process. "
+                               f"headers={json.dumps(headers)} body={body!r}")
+                    with self.lock:
+                        self.access_denial = message
+                    raise QueryFailure(message)
                 if response.status_code == 429:
                     try:
                         retry_after = min(float(response.headers.get("Retry-After", 1)), 10)
@@ -107,6 +124,9 @@ class HTTPTransport:
                     raise QueryFailure(str(result["error"]))
                 return result
             except (requests.RequestException, ValueError, QueryFailure) as exc:
+                with self.lock:
+                    if self.access_denial is not None:
+                        raise QueryFailure(self.access_denial) from exc
                 last_error = exc
                 if attempt + 1 < self.attempts:
                     time.sleep(max(retry_after, min(0.25 * 2 ** attempt, 4)))

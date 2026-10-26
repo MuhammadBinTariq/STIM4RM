@@ -194,6 +194,26 @@ Telemetry observes rather than auto-killing jobs. STIM failures stop incomplete
 treatment batches and preserve resumable state. Do not call empty_cache every
 step as a substitute for diagnosing live tensors.
 
+If an API failure reports HTTP 401/403, stop the pilot. This is an access denial,
+not evidence of GPU OOM or proof of rate limiting. The transport stops retrying
+and blocks subsequent HTTP requests for its lifetime (already in-flight requests
+may finish). Errors include selected response headers and a short body excerpt;
+unsuccessful requests are never cached as counts. Keep the checkpoint, pending
+batch and cache snapshot. Do not change the scoring recipe to hide the failure.
+
+After resolving access with the service, inspect the saved batch without loading
+policy or PRM weights:
+
+```bash
+"$PY" -u scripts/diagnose_stim.py --run-dir "$OUT/pilot-l4-lambda01/baseline-seed42" --max-positions 32
+```
+
+This command snapshots successful cache entries even on failure and exits nonzero
+if any inspected position has a query failure. A successful partial inspection
+does not establish full-batch coverage. If access is still denied, retain the
+diagnostic for the service maintainers and leave training stopped. Once access
+works, repeat the original pilot command to resume the saved batch.
+
 ## 5. Primary sweep and lambda selection
 
 Use lambda=0.1 as the primary treatment. Test 0.2 on DEVELOPMENT data before

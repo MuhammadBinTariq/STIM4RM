@@ -37,7 +37,9 @@ def main():
                 item = scorer.score_position(record,position)
                 observations.append(vars(item))
                 print(json.dumps(vars(item)), flush=True)
-                if item.status == "query_failure" or len(observations) >= args.max_positions:
+                if item.status == "query_failure":
+                    return 1
+                if len(observations) >= args.max_positions:
                     return
     finally:
         print(json.dumps({"pending_batch":pending["step"],
@@ -46,4 +48,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
