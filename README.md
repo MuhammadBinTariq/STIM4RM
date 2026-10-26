@@ -1,4 +1,29 @@
-# Diagnosing Memorization in Chain-of-Thought Reasoning, One Token at a Time
+# RewardMaxxing v2 (STIM-GRPO)
+
+The `refactor/v2` implementation uses a custom PyTorch GRPO loop, PEFT/LoRA,
+token-aligned rollout records, exact categorical KL, and persistent SQLite
+Infini-gram caching. Start with **[the v2 guide](docs/V2.md)**.
+For Git publication, GPU budgets, pilot telemetry and separate-process PRM
+evaluation, use **[the execution guide](docs/EXECUTION.md)** and the
+[Colab notebook](notebooks/RewardMaxxing_v2.ipynb).
+
+```bash
+python tests/smoke_test.py
+python -m src.prepare --config configs/rewardmaxxing.json --output runs/resolved.json
+python -m src.train --config runs/resolved.json
+```
+
+Install `requirements-v2.txt` for v2. The older `requirements.txt` and scripts
+below belong to the original research code. **Do not train v2 on
+`data/applied/original.json`: it contains GSM8K test questions.**
+
+The default scorer is explicitly a retokenized, capped-context proxy on the
+stage-one OLMo-mix corpus. It is not native-token STIM on the complete model
+training corpus. No empirical performance claims are made by this code release.
+
+---
+
+## Original STIM repository documentation (legacy)
 This repository contains code and data for paper "[Diagnosing Memorization in Chain-of-Thought Reasoning, One Token at a Time](https://arxiv.org/abs/2508.02037)"
 
 ## Quick Links
