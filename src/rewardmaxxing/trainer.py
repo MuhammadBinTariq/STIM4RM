@@ -116,13 +116,18 @@ def train(policy, reward_model, scorer, optimizer, cfg, batches, manifest, start
                 counts = Counter(o.status for o in observations)
                 if scorer and not counts["ok"] and cfg.stim_lambda:
                     raise ValueError(f"No valid STIM observations in batch: {dict(counts)}. Inspect coverage before training.")
-            except Exception:
+            except Exception as exc:
                 # No update yet: persist the exact policy required by pending old logps.
                 if step != last_saved:
                     save_checkpoint(output, policy, optimizer, cfg, step, manifest)
                     last_saved = step
                 if scorer and cfg.stim.cache_backup:
                     scorer.client.cache.snapshot(cfg.stim.cache_backup)
+                atomic_json(output / "failures" / f"batch-{step:06d}-{time.time_ns()}.json", {
+                    "completed_updates":step, "error_type":type(exc).__name__, "error":str(exc),
+                    "stim_observations":getattr(exc, "observations", []),
+                    "cache":{k:scorer.client.stats[k]-cache_before[k] for k in cache_before} if scorer else {},
+                    "pending_saved":pending.exists()})
                 raise
             update_started = time.perf_counter()
             metrics = update(policy, records, penalty, optimizer, cfg)

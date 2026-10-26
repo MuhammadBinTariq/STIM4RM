@@ -352,6 +352,30 @@ class SmokeTests(unittest.TestCase):
             finally:
                 scorer.close()
 
+    def test_stim_failure_preserves_api_cause_and_position(self):
+        tokenizer = tiny_tokenizer()
+        cfg = StimConfig(mode="native", top_k=3, max_positions=2, min_probability=0.0)
+        record = Rollout("api-fixture",0,"Q","#### 3",[1],[4,6,7],"A 1 2")
+        record.old_log_probs = torch.full((3,), -0.5)
+        record.top_ids = torch.tensor([[6,7,8]]*3)
+        record.top_probs = torch.tensor([[0.5,0.3,0.2]]*3)
+        def fail(_):
+            raise QueryFailure("HTTP 429 fixture: retry later")
+        with tempfile.TemporaryDirectory(dir=ROOT/".tmp") as directory:
+            client = InfiniGramClient(SQLiteCache(Path(directory)/"c.sqlite"),"fixture","v1",fail)
+            scorer = StimScorer(cfg,tokenizer,tokenizer,client)
+            try:
+                with self.assertRaises(QueryFailure) as caught:
+                    scorer.score([record],positions=[[1]])
+                self.assertIn("1/1 selected token positions",str(caught.exception))
+                self.assertIn("HTTP 429 fixture",str(caught.exception))
+                observation = caught.exception.observations[0]
+                self.assertEqual(observation["position"],1)
+                self.assertIsNone(observation["rho"])
+                self.assertIn("HTTP 429 fixture",observation["error"])
+            finally:
+                scorer.close()
+
     def test_answers_and_split_isolation(self):
         self.assertEqual(str(parse_answer("#### -5")), "-5")
         self.assertEqual(str(parse_answer("#### 3/4")), "3/4")
@@ -417,6 +441,11 @@ class SmokeTests(unittest.TestCase):
             with self.assertRaises(QueryFailure):
                 train(policy, reward, scorer, optimizer, cfg, [[]], {"fixture":True})
             self.assertTrue((Path(directory)/"pending.pt").exists())
+            failures = list((Path(directory)/"failures").glob("*.json"))
+            self.assertEqual(len(failures),1)
+            failure = json.loads(failures[0].read_text())
+            self.assertEqual(failure["error"],"simulated HTTP outage")
+            self.assertTrue(failure["pending_saved"])
             self.assertFalse(optimizer.state)
             initial = Path(directory)/"step-000000"
             resumed = tiny_policy(initial/"adapter")

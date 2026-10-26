@@ -155,7 +155,8 @@ class InfiniGramClient:
                 raise QueryFailure(str(result["error"]))
             count = result.get("count")
             if type(count) is not int or count < 0 or result.get("approx", True) is not False:
-                raise QueryFailure("Missing/invalid/approximate count; exact count required")
+                raise QueryFailure(f"Exact count required: count={count!r}, approx={result.get('approx')!r}; "
+                                   f"response keys={sorted(result)}")
             self.cache.put(key, {"count": count, "approx": False})
             future.set_result(count)
             return count

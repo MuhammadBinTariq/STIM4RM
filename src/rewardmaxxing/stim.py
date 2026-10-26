@@ -1,6 +1,7 @@
 """Sparse, capped-context STIM-local. Missing observations remain explicit."""
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from collections import Counter
 import hashlib
 import math
 import re
@@ -51,6 +52,7 @@ class Observation:
     rho: float | None = None
     support: int | None = None
     context_length: int | None = None
+    error: str | None = None
 
 
 def select_positions(record, tokenizer, config, audit=False):
@@ -174,8 +176,8 @@ class StimScorer:
             if rho is None:
                 return observation("undefined_rho", support=support, context_length=low)
             return observation("ok", rho=rho, support=support, context_length=low)
-        except QueryFailure:
-            return observation("query_failure")
+        except QueryFailure as exc:
+            return observation("query_failure", error=str(exc)[:500])
 
     def score(self, records, audit=False, positions=None):
         length = max(len(r.completion_ids) for r in records)
@@ -194,7 +196,12 @@ class StimScorer:
                 penalty[row, result.position] = max(0.0, result.rho)
         failures = sum(o.status == "query_failure" for o in observations)
         if failures / max(1, len(observations)) > self.config.max_failure_fraction:
-            raise QueryFailure(f"STIM incomplete: {failures}/{len(observations)} queries failed. Resume pending batch.")
+            causes = Counter(o.error for o in observations if o.status == "query_failure")
+            detail = "; ".join(f"{n} position(s): {message}" for message,n in causes.most_common(3))
+            error = QueryFailure(f"STIM incomplete: {failures}/{len(observations)} selected token positions failed. "
+                                 f"Resume pending batch. Causes: {detail}")
+            error.observations = [vars(o) for o in observations]
+            raise error
         return penalty, observations
 
     def close(self):

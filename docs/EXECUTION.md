@@ -93,14 +93,15 @@ https://research.google.com/colaboratory/faq.html
 
 ## 3. First 25-update systems pilot
 
-The notebook installs into /content/rewardmaxxing-venv, runs the CPU smoke test,
+The notebook uses uv to install Python 3.12 into /content/rewardmaxxing-venv-py312,
+independently of the system/kernel Python version, and runs the CPU smoke test,
 and keeps HF_HOME and live SQLite on local SSD. Only snapshots/results go to Drive.
 The following Bash variables are reused below; the notebook has equivalent
 subprocess.run calls with explicit working directories.
 
 ```bash
 cd /content/rewardmaxxing-v2
-PY=/content/rewardmaxxing-venv/bin/python
+PY=/content/rewardmaxxing-venv-py312/bin/python
 OUT=/content/drive/MyDrive/RewardMaxxing-v2
 RESOLVED="$OUT/resolved.json"
 # Resolve once and reuse. This refuses to overwrite an existing file.
